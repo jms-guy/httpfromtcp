@@ -44,6 +44,7 @@ func getLinesChannel(f io.ReadCloser) <-chan string {
 			numBytes, err := f.Read(messages)
 			if err != nil {
 				if err == io.EOF {
+					messChannel <- currLine
 					return
 				} else {
 					log.Fatal(err)
@@ -56,9 +57,6 @@ func getLinesChannel(f io.ReadCloser) <-chan string {
 					messChannel <- currLine
 					currLine = parts[1]
 				}
-			}
-			if numBytes < 8 {
-				messChannel <- currLine
 			}
 		}
 	}()
