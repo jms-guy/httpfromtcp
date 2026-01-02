@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net"
-	"strings"
+
+	"github.com/jms-guy/httpfromtcp/internal/request"
 )
 
 func main() {
@@ -22,44 +22,16 @@ func main() {
 		}
 		fmt.Println("Connection accepted")
 
-		messages := getLinesChannel(conn)
-
-		for m := range messages {
-			fmt.Println(m)
+		req, err := request.RequestFromReader(conn)
+		if err != nil {
+			log.Fatal(err)
 		}
+
+		fmt.Println("Request line:")
+		fmt.Printf("- Method: %s\n", req.RequestLine.Method)
+		fmt.Printf("- Target: %s\n", req.RequestLine.RequestTarget)
+		fmt.Printf("- Version: %s\n", req.RequestLine.HttpVersion)
+
 		fmt.Println("Connection closed")
 	}
-}
-
-func getLinesChannel(f io.ReadCloser) <-chan string {
-	messChannel := make(chan string)
-
-	go func() {
-		defer close(messChannel)
-		messages := make([]byte, 8)
-		currLine := ""
-
-		for {
-			clear(messages)
-			numBytes, err := f.Read(messages)
-			if err != nil {
-				if err == io.EOF {
-					messChannel <- currLine
-					return
-				} else {
-					log.Fatal(err)
-				}
-			}
-			if numBytes > 0 {
-				parts := strings.Split(string(messages), "\n")
-				currLine += parts[0]
-				if len(parts) > 1 {
-					messChannel <- currLine
-					currLine = parts[1]
-				}
-			}
-		}
-	}()
-
-	return messChannel
 }
