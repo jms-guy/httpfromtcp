@@ -20,9 +20,9 @@ const (
 )
 
 type Request struct {
-	RequestLine    RequestLine
-	RequestHeaders headers.Headers
-	ParserState    requestState
+	RequestLine RequestLine
+	Headers     headers.Headers
+	ParserState requestState
 }
 
 type RequestLine struct {
@@ -34,7 +34,7 @@ type RequestLine struct {
 func RequestFromReader(reader io.Reader) (*Request, error) {
 	buf := make([]byte, bufferSize, bufferSize)
 	readToIndex := 0
-	request := &Request{RequestHeaders: make(headers.Headers), ParserState: requestStateInitialized}
+	request := &Request{Headers: make(headers.Headers), ParserState: requestStateInitialized}
 	readerEmpty := false
 	bytesRead := 0
 	var err error
@@ -79,6 +79,23 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 }
 
 func (r *Request) parse(data []byte) (int, error) {
+	totalBytesParsed := 0
+	for r.ParserState != requestStateDone {
+		n, err := r.parseSingle(data[totalBytesParsed:])
+		if err != nil {
+			return totalBytesParsed, err
+		}
+		if n == 0 {
+			break
+		}
+		totalBytesParsed += n
+	}
+
+	return totalBytesParsed, nil
+}
+
+func (r *Request) parseSingle(data []byte) (int, error) {
+	totalBytesParsed := 0
 	switch r.ParserState {
 	case requestStateInitialized:
 		requestLine, numBytes, err := parseRequestLine(data)
@@ -93,27 +110,21 @@ func (r *Request) parse(data []byte) (int, error) {
 			return numBytes, nil
 		}
 	case requestStateParsingHeaders:
-		totalBytesParsed := 0
-		dataLeftToParse := data
-		for {
-			bytesParsed, done, err := r.RequestHeaders.Parse(dataLeftToParse)
-			if err != nil {
-				return 0, err
-			}
-			if done {
-				r.ParserState = requestStateDone
-				break
-			}
-			dataLeftToParse = dataLeftToParse[bytesParsed:]
-			totalBytesParsed += bytesParsed
+		bytesParsed, done, err := r.Headers.Parse(data)
+		if err != nil {
+			return 0, err
 		}
-		return totalBytesParsed, nil
-
+		if done {
+			r.ParserState = requestStateDone
+			return bytesParsed, nil
+		}
+		totalBytesParsed += bytesParsed
 	case requestStateDone:
-		return 0, fmt.Errorf("error:trying to read data in a done state")
+		return 0, fmt.Errorf("error: trying to read data in a done state")
 	default:
 		return 0, fmt.Errorf("error: unknown state")
 	}
+	return totalBytesParsed, nil
 }
 
 func parseRequestLine(requestBytes []byte) (RequestLine, int, error) {
