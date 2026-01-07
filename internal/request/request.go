@@ -3,6 +3,7 @@ package request
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -16,12 +17,14 @@ type requestState int
 const (
 	requestStateInitialized requestState = iota
 	requestStateParsingHeaders
+	requestStateParsingBody
 	requestStateDone
 )
 
 type Request struct {
 	RequestLine RequestLine
 	Headers     headers.Headers
+	Body        []byte
 	ParserState requestState
 }
 
@@ -71,6 +74,9 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 		if readerEmpty && bytesParsed == 0 && request.ParserState == requestStateInitialized {
 			return request, fmt.Errorf("error: incomplete data at EOF")
 		}
+		if readerEmpty && bytesParsed == 0 && request.ParserState == requestStateParsingBody {
+			return request, fmt.Errorf("error: request body is shorter than content-length")
+		}
 		copy(buf, buf[bytesParsed:readToIndex])
 		readToIndex -= bytesParsed
 	}
@@ -115,10 +121,32 @@ func (r *Request) parseSingle(data []byte) (int, error) {
 			return 0, err
 		}
 		if done {
-			r.ParserState = requestStateDone
+			r.ParserState = requestStateParsingBody
 			return bytesParsed, nil
 		}
 		totalBytesParsed += bytesParsed
+	case requestStateParsingBody:
+		contentLength := r.Headers.Get("content-length")
+		if contentLength == "" && len(data) == 0 {
+			r.ParserState = requestStateDone
+			return 0, nil
+		} else if contentLength == "" && len(data) != 0 {
+			r.ParserState = requestStateDone
+			return 0, fmt.Errorf("error: no content-length but body present")
+		}
+		r.Body = append(r.Body, data...)
+		contentLengthInt, err := strconv.Atoi(contentLength)
+		if err != nil {
+			return 0, err
+		}
+
+		if len(r.Body) > contentLengthInt {
+			return 0, fmt.Errorf("error: request body is greater than content-length")
+		}
+		if len(r.Body) == contentLengthInt {
+			r.ParserState = requestStateDone
+		}
+		return len(data), nil
 	case requestStateDone:
 		return 0, fmt.Errorf("error: trying to read data in a done state")
 	default:

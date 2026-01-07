@@ -14,6 +14,11 @@ func NewHeaders() Headers {
 	return make(Headers)
 }
 
+func (h Headers) Get(key string) string {
+	lowerKey := strings.ToLower(key)
+	return h[lowerKey]
+}
+
 func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 	// No CRLF found
 	if !strings.Contains(string(data), "\r\n") {
@@ -21,7 +26,7 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 	}
 	// CRLF at start of data, end of headers
 	if string(data[:2]) == "\r\n" {
-		return 0, true, nil
+		return 2, true, nil
 	}
 
 	headerLines := strings.Split(string(data), "\r\n")
