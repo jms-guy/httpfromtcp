@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"fmt"
 	"net"
 	"sync/atomic"
@@ -12,6 +11,7 @@ import (
 
 type Server struct {
 	Listener net.Listener
+	Handler  Handler
 	isClosed atomic.Bool
 }
 
@@ -21,9 +21,9 @@ func Serve(port int, handler Handler) (*Server, error) {
 		return nil, fmt.Errorf("error starting tcp listener")
 	}
 
-	newServer := Server{Listener: listener}
+	newServer := Server{Listener: listener, Handler: handler}
 
-	go newServer.listen(handler)
+	go newServer.listen()
 
 	return &newServer, nil
 }
@@ -38,7 +38,7 @@ func (s *Server) Close() error {
 	return nil
 }
 
-func (s *Server) listen(handler Handler) {
+func (s *Server) listen() {
 	for {
 		conn, err := s.Listener.Accept()
 		if err != nil {
@@ -48,41 +48,18 @@ func (s *Server) listen(handler Handler) {
 			continue
 		}
 
-		go s.handle(handler, conn)
+		go s.handle(conn)
 	}
 }
 
-func (s *Server) handle(handler Handler, conn net.Conn) {
+func (s *Server) handle(conn net.Conn) {
+	defer conn.Close()
 	req, err := request.RequestFromReader(conn)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
+	resp := response.Writer{ResponseWriter: conn}
 
-	var buf bytes.Buffer
-	hErr := handler(&buf, req)
-
-	if hErr != nil {
-		err = response.WriteStatusLine(conn, hErr.StatusCode)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		err = response.WriteHeaders(conn, response.GetDefaultHeaders(len(hErr.Msg)))
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		conn.Write([]byte(hErr.Msg))
-		return
-	} else {
-		err = response.WriteStatusLine(conn, response.Code200)
-	}
-	headers := response.GetDefaultHeaders(buf.Len())
-	err = response.WriteHeaders(conn, headers)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	conn.Write(buf.Bytes())
+	s.Handler(&resp, req)
 }
