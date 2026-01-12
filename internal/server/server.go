@@ -1,11 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"fmt"
-	"log"
 	"net"
 	"sync/atomic"
 
+	"github.com/jms-guy/httpfromtcp/internal/request"
 	"github.com/jms-guy/httpfromtcp/internal/response"
 )
 
@@ -14,7 +15,7 @@ type Server struct {
 	isClosed atomic.Bool
 }
 
-func Serve(port int) (*Server, error) {
+func Serve(port int, handler Handler) (*Server, error) {
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return nil, fmt.Errorf("error starting tcp listener")
@@ -22,7 +23,7 @@ func Serve(port int) (*Server, error) {
 
 	newServer := Server{Listener: listener}
 
-	go newServer.listen()
+	go newServer.listen(handler)
 
 	return &newServer, nil
 }
@@ -37,7 +38,7 @@ func (s *Server) Close() error {
 	return nil
 }
 
-func (s *Server) listen() {
+func (s *Server) listen(handler Handler) {
 	for {
 		conn, err := s.Listener.Accept()
 		if err != nil {
@@ -47,19 +48,41 @@ func (s *Server) listen() {
 			continue
 		}
 
-		go s.handle(conn)
+		go s.handle(handler, conn)
 	}
 }
 
-func (s *Server) handle(conn net.Conn) {
-	defaultHeaders := response.GetDefaultHeaders(0)
-	err := response.WriteStatusLine(conn, response.Code200)
+func (s *Server) handle(handler Handler, conn net.Conn) {
+	req, err := request.RequestFromReader(conn)
 	if err != nil {
-		log.Println(err)
+		fmt.Println(err)
+		return
 	}
-	err = response.WriteHeaders(conn, defaultHeaders)
+
+	var buf bytes.Buffer
+	hErr := handler(&buf, req)
+
+	if hErr != nil {
+		err = response.WriteStatusLine(conn, hErr.StatusCode)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		err = response.WriteHeaders(conn, response.GetDefaultHeaders(len(hErr.Msg)))
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		conn.Write([]byte(hErr.Msg))
+		return
+	} else {
+		err = response.WriteStatusLine(conn, response.Code200)
+	}
+	headers := response.GetDefaultHeaders(buf.Len())
+	err = response.WriteHeaders(conn, headers)
 	if err != nil {
-		log.Println(err)
+		fmt.Println(err)
+		return
 	}
-	conn.Close()
+	conn.Write(buf.Bytes())
 }
