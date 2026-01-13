@@ -1,11 +1,17 @@
 package main
 
 import (
+	"crypto/sha256"
+	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
+	"github.com/jms-guy/httpfromtcp/internal/headers"
 	"github.com/jms-guy/httpfromtcp/internal/request"
 	"github.com/jms-guy/httpfromtcp/internal/response"
 	"github.com/jms-guy/httpfromtcp/internal/server"
@@ -29,7 +35,11 @@ func main() {
 			</html>`)...)
 			w.Status = response.Code400
 			w.WriteStatusLine()
-			w.WriteHeaders()
+			w.WriteHeaders(headers.Headers{
+				"Content-Length": fmt.Sprintf("%s", strconv.Itoa(len(w.Body))),
+				"Connection":     "close",
+				"Content-Type":   "text/html",
+			})
 			_, err := w.WriteBody()
 			if err != nil {
 				log.Println(err)
@@ -47,11 +57,55 @@ func main() {
 			</html>`)...)
 			w.Status = response.Code500
 			w.WriteStatusLine()
-			w.WriteHeaders()
+			w.WriteHeaders(headers.Headers{
+				"Content-Length": fmt.Sprintf("%s", strconv.Itoa(len(w.Body))),
+				"Connection":     "close",
+				"Content-Type":   "text/html",
+			})
 			_, err := w.WriteBody()
 			if err != nil {
 				log.Println(err)
 			}
+		case "/httpbin/html":
+			resp, err := http.Get("https://httpbin.org/html")
+			if err != nil {
+				log.Println(err)
+			}
+			w.Status = response.Code200
+			w.WriteStatusLine()
+			w.WriteHeaders(headers.Headers{
+				"Content-Type":      "text/plain",
+				"Transfer-Encoding": "chunked",
+				"Trailer":           "X-Content-Sha256, X-Content-Length",
+			})
+			buf := make([]byte, 1024)
+			totalBytesWritten := 0
+			for {
+				n, err := resp.Body.Read(buf)
+				if err != nil {
+					if err == io.EOF {
+						break
+					}
+					log.Println(err)
+					break
+				}
+				bytesWritten, err := w.WriteChunkedBody(buf[:n])
+				if err != nil {
+					log.Println(err)
+					break
+				}
+				totalBytesWritten += bytesWritten
+			}
+			bytesWritten, err := w.WriteChunkedBodyDone()
+			if err != nil {
+				log.Println(err)
+			}
+			totalBytesWritten += bytesWritten
+			bodyHash := sha256.Sum256(w.Body)
+			w.WriteTrailers(headers.Headers{
+				"X-Content-Sha256": fmt.Sprintf("%x", bodyHash),
+				"X-Content-Length": fmt.Sprintf("%d", len(w.Body)),
+			})
 		default:
 			w.Body = append(w.Body, []byte(`
 			<html>
@@ -65,7 +119,11 @@ func main() {
 			</html>`)...)
 			w.Status = response.Code200
 			w.WriteStatusLine()
-			w.WriteHeaders()
+			w.WriteHeaders(headers.Headers{
+				"Content-Length": fmt.Sprintf("%s", strconv.Itoa(len(w.Body))),
+				"Connection":     "close",
+				"Content-Type":   "text/html",
+			})
 			_, err := w.WriteBody()
 			if err != nil {
 				log.Println(err)

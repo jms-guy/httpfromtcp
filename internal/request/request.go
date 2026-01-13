@@ -130,9 +130,9 @@ func (r *Request) parseSingle(data []byte) (int, error) {
 		if contentLength == "" && len(data) == 0 {
 			r.ParserState = requestStateDone
 			return 0, nil
-		} else if contentLength == "" && len(data) != 0 {
+		} else if contentLength == "" {
 			r.ParserState = requestStateDone
-			return 0, fmt.Errorf("error: no content-length but body present")
+			return 0, nil
 		}
 		r.Body = append(r.Body, data...)
 		contentLengthInt, err := strconv.Atoi(contentLength)

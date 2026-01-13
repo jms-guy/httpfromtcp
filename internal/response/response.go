@@ -3,7 +3,6 @@ package response
 import (
 	"fmt"
 	"io"
-	"strconv"
 
 	"github.com/jms-guy/httpfromtcp/internal/headers"
 )
@@ -43,12 +42,26 @@ func (w *Writer) WriteStatusLine() error {
 	return nil
 }
 
-func (w *Writer) WriteHeaders() error {
-	defaultHeaders := GetDefaultHeaders(len(w.Body))
-	for key, val := range defaultHeaders {
-		_, err := w.ResponseWriter.Write([]byte(key + val))
+func (w *Writer) WriteHeaders(headers headers.Headers) error {
+	for key, val := range headers {
+		_, err := w.ResponseWriter.Write([]byte(fmt.Sprintf("%s: %s\r\n", key, val)))
 		if err != nil {
 			return fmt.Errorf("error writing header: %s %s: %s", key, val, err)
+		}
+	}
+	_, err := w.ResponseWriter.Write([]byte("\r\n"))
+	if err != nil {
+		return fmt.Errorf("error writing final CLRF: %s", err)
+	}
+
+	return nil
+}
+
+func (w *Writer) WriteTrailers(headers headers.Headers) error {
+	for key, val := range headers {
+		_, err := w.ResponseWriter.Write([]byte(fmt.Sprintf("%s: %s\r\n", key, val)))
+		if err != nil {
+			return fmt.Errorf("error writing trailer: %s %s: %s", key, val, err)
 		}
 	}
 	_, err := w.ResponseWriter.Write([]byte("\r\n"))
@@ -67,10 +80,32 @@ func (w *Writer) WriteBody() (int, error) {
 	return numBytes, nil
 }
 
-func GetDefaultHeaders(contentLen int) headers.Headers {
-	return headers.Headers{
-		"Content-Length: ": fmt.Sprintf("%s\r\n", strconv.Itoa(contentLen)),
-		"Connection: ":     "close\r\n",
-		"Content-Type: ":   "text/html\r\n",
+func (w *Writer) WriteChunkedBody(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
 	}
+	chunkHex := fmt.Sprintf("%X\r\n", len(p))
+
+	numBytesHex, err := w.ResponseWriter.Write([]byte(chunkHex))
+	if err != nil {
+		return 0, fmt.Errorf("error writing byte chunk to response writer")
+	}
+	numBytesMain, err := w.ResponseWriter.Write(p)
+	if err != nil {
+		return 0, fmt.Errorf("error writing byte chunk to response writer")
+	}
+	numBytesCLRF, err := w.ResponseWriter.Write([]byte("\r\n"))
+	if err != nil {
+		return 0, fmt.Errorf("error writing byte chunk to response writer")
+	}
+	w.Body = append(w.Body, p...)
+	return numBytesHex + numBytesMain + numBytesCLRF, nil
+}
+
+func (w *Writer) WriteChunkedBodyDone() (int, error) {
+	numBytes, err := w.ResponseWriter.Write([]byte("0\r\n"))
+	if err != nil {
+		return 0, fmt.Errorf("error writing final 0 chunk to response")
+	}
+	return numBytes, nil
 }
