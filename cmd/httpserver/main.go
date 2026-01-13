@@ -106,6 +106,21 @@ func main() {
 				"X-Content-Sha256": fmt.Sprintf("%x", bodyHash),
 				"X-Content-Length": fmt.Sprintf("%d", len(w.Body)),
 			})
+		case "/video":
+			w.Status = response.Code200
+			w.WriteStatusLine()
+			w.WriteHeaders(headers.Headers{
+				"Content-Type": "video/mp4",
+			})
+			video, err := os.ReadFile("./assets/vim.mp4")
+			if err != nil {
+				log.Println(err)
+			}
+			w.Body = append(w.Body, video...)
+			_, err = w.WriteBody()
+			if err != nil {
+				log.Println(err)
+			}
 		default:
 			w.Body = append(w.Body, []byte(`
 			<html>
